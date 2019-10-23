@@ -22,7 +22,7 @@ Shadow shadowEffect = null;
 float secondPosition = 0;
 Variable secondVariable = null;
 
-var timer = new System.Windows.Forms.Timer { Enabled = true, Interval = 1000 };
+using var timer = new System.Windows.Forms.Timer { Enabled = true, Interval = 1000 };
 timer.Tick += (o, e) =>
 {
 	secondVariable?.Dispose();
@@ -33,11 +33,19 @@ timer.Tick += (o, e) =>
 	}, DateTime.Now.Second, 0.2f);
 };
 
-form.FormClosing += delegate { timer.Dispose(); };
-
 form.UpdateLogic += (window, dt) =>
 {
 	secondPosition = (float)(secondVariable?.Value ?? DateTime.Now.Second);
+};
+
+form.CreateDeviceResources += (RenderWindow sender) =>
+{
+    shadowEffect = new SharpDX.Direct2D1.Effects.Shadow(form.XResource.RenderTarget);
+};
+
+form.ReleaseDeviceResources += (RenderWindow sender) =>
+{
+    shadowEffect.Dispose();
 };
 
 form.CreateDeviceSizeResources += (RenderWindow sender) =>
@@ -45,14 +53,11 @@ form.CreateDeviceSizeResources += (RenderWindow sender) =>
 	bitmap = new Bitmap1(form.XResource.RenderTarget, form.XResource.RenderTarget.PixelSize,
 		new BitmapProperties1(new PixelFormat(Format.B8G8R8A8_UNorm, SharpDX.Direct2D1.AlphaMode.Premultiplied),
 		dpi, dpi, BitmapOptions.Target));
-	shadowEffect = new SharpDX.Direct2D1.Effects.Shadow(form.XResource.RenderTarget);
 };
 
 form.ReleaseDeviceSizeResources += o =>
 {
 	bitmap.Dispose();
-	shadowEffect.Dispose();
-	timer.Dispose();
 };
 	
 form.Draw += (RenderWindow sender, DeviceContext ctx) =>
@@ -80,7 +85,7 @@ form.Draw += (RenderWindow sender, DeviceContext ctx) =>
     
 	ctx.EndDraw();
 	
-	var oldTarget = ctx.Target;
+	using var oldTarget = ctx.Target;
 	ctx.Target = bitmap;
 	ctx.BeginDraw();
     {
@@ -120,4 +125,5 @@ form.Draw += (RenderWindow sender, DeviceContext ctx) =>
 		ctx.UnitMode = UnitMode.Dips;
 	}
 };
+QueryCancelToken.Register (() => form.Close());
 RenderLoop.Run(form, () => form.Render(1, PresentFlags.None));
