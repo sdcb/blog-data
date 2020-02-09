@@ -9,26 +9,41 @@
 </Query>
 
 static Random random = new Random();
-const float SafeDistance = 2.0f; // 要靠多近，才会触发感染验证
-const float InffectRate = 0.8f; // 靠得够近时，被携带者感染的机率
-const float SecondsPerDay = 1.0f; // 模拟器的秒数，对应真实一天
-const double MovingWilling = 0.99; // 移动意愿，0-1
-const float MovingDistancePerDay = 50.0f; // 每天移动距离
-const int InitialInfectorCount = 5; // 最初感染者数
-const double DeathRate = 0.021; // 死亡率
-const int HospitalBeds = 80;
+static double MoveWilling = 0.90f; // 移动意愿，0-1
+static bool WearMask = false; // 是否戴口罩
+static int HospitalBeds = 40; // 床位数
 
-const float PersonSize = 4.0f;
-const float HospitalBedSize = 20.0f;
-const float HospitalHeight = 800.0f;
+const float InffectRate = 0.8f; // 靠得够近时，被携带者感染的机率
+const float SecondsPerDay = 0.3f; // 模拟器的秒数，对应真实一天
+const float MovingDistancePerDay = 10.0f; // 每天移动距离
+const int InitialInfectorCount = 5; // 最初感染者数
+const double DeathRate = 0.021; // 死亡率5
+
+// 要靠多近，才会触发感染验证
+static float SafeDistance() => WearMask ? 1.5f : 3.5f;
 
 // 住院治愈时间，最短5天，最长12.75天，平均约7天
 static float GenerateCureDays() => random.NextFloat(5, 12.75f);
+// 潜伏期，1-14天
 static float GenerateShadowDays() => random.Next(1, 14);
+// 发病后，就医时间，0-3天
+static float GenerateToHospitalDays() => random.Next(0, 3);
+
+// 显示参数
+const float PersonSize = 4.0f;
+const float HospitalBedSize = 20.0f;
+const float HospitalHeight = 800.0f;
+const float HospitalY = -400; const float HospitalX = 410;
 
 void Main()
 {
-	using (var w = new VirusWindow { Text = "病毒传播模拟", WindowState = FormWindowState.Maximized })
+	Util.NewProcess = true;
+	using (var w = new VirusWindow 
+	{ 
+		Text = "病毒传播模拟", 
+		ClientSize = new System.Drawing.Size(600, 600), 
+		StartPosition = FormStartPosition.CenterScreen 
+	})
 	{
 		RenderLoop.Run(w, () => w.Render(1, PresentFlags.None));
 	}
@@ -36,13 +51,31 @@ void Main()
 
 class VirusWindow : RenderWindow
 {
-	City[] Cities = new[] { City.Create() };
+	City City = City.Create();
 
 	protected override void OnUpdateLogic(float dt)
 	{
-		foreach (var city in Cities)
+		City.Update(dt);
+	}
+
+	protected override void OnKeyPress(KeyPressEventArgs e)
+	{
+		switch (e.KeyChar)
 		{
-			city.Update(dt);
+			case '1': MoveWilling = 0.10f; break;
+			case '2': MoveWilling = 0.50f; break;
+			case '3': MoveWilling = 0.90f; break;
+			case 'M': WearMask = !WearMask; break;
+			case 'A': HospitalBeds += 40; break;
+			case 'D': HospitalBeds -= 40; break;
+			case 'R':
+				{
+					if (MessageBox.Show("要重来吗？", "确认", MessageBoxButtons.YesNo) == DialogResult.Yes)
+					{
+						City = City.Create();
+					}
+					break;
+				}
 		}
 	}
 
@@ -55,10 +88,7 @@ class VirusWindow : RenderWindow
 		ctx.Transform =
 			Matrix3x2.Scaling(scale) *
 			Matrix3x2.Translation(ClientSize.Width / 2, ClientSize.Height / 2);
-		foreach (var city in Cities)
-		{
-			city.Draw(ctx, XResource);
-		}
+		City.Draw(ctx, XResource);
 	}
 }
 
@@ -110,6 +140,8 @@ class City
 		DrawStatus(ctx, x);
 	}
 
+	float tagDay = 0;
+	string notificationText = null, notificationTitle = null;
 	void DrawStatus(DeviceContext ctx, XResource x)
 	{
 		ctx.Transform = Matrix3x2.Identity;
@@ -127,9 +159,29 @@ class City
 				_ => throw new InvalidOperationException()
 			};
 		}
+
+		if (notificationText != null)
+		{
+			MessageBox.Show(notificationText, notificationTitle);
+			notificationText = null;
+		}
+		if (infected == 0 && illness == 0 && inHospital == 0 && tagDay == 0)
+		{
+			tagDay = day;
+			notificationText = $"你在第{day:F1}天击败了病毒！死亡人数：{dead}";
+			notificationTitle = "恭喜！";
+		}
+		else if (healthy <= (Population / 2) && tagDay == 0)
+		{
+			tagDay = day;
+			notificationText = $"第{day:F1}天，疫情控制失败！\n（超过一半的人被感染即视为失败）";
+			notificationTitle = "失败！你没能阻止病毒的肆虐。";
+		}
+
+		string wearMaskText = WearMask ? "✔" : "❌";
 		var texts = new[]
 		{
-			(text: $"第{day:F1}天", color: Color.Black),
+			(text: $"第{day:F1}天 移动意愿:{MoveWilling:P0} 居民戴口罩:{wearMaskText}", color: Color.Black),
 			(text: $"健康人数：{healthy}", color: ColorFromStatus(PersonStatus.Healthy)),
 			(text: $"感染人数：{infected}", color: ColorFromStatus(PersonStatus.InfectedInShadow)),
 			(text: $"发病人数：{illness+inHospital}", color: ColorFromStatus(PersonStatus.Illness)),
@@ -139,7 +191,9 @@ class City
 		};
 		for (var i = 0; i < texts.Length; ++i)
 		{
-			ctx.DrawText(texts[i].text, x.TextFormats[20], new RectangleF(10, i * 24, ctx.Size.Width, ctx.Size.Height), x.GetColor(texts[i].color));
+			ctx.DrawText(texts[i].text, x.TextFormats[18], new RectangleF(5, i * 20, ctx.Size.Width, ctx.Size.Height),
+				x.GetColor(texts[i].color),
+				DrawTextOptions.EnableColorFont);
 		}
 	}
 
@@ -165,14 +219,48 @@ class City
 
 	void StepDay()
 	{
-		Hospital.Heal(Persons);
+		Hospital.Heal(Persons, infectorIds);
 
-		// infected -> illness
-		for (var i = 0; i < infectorIds.Count; ++i)
+		for (var i = 0; i < Persons.Length; ++i)
 		{
-			if (Persons[i].Status == PersonStatus.InfectedInShadow && --Persons[i].EstimateDays <= 0)
+			Persons[i].Direction = random.NextDouble() < MoveWilling ? 
+				random.NextFloat(0, MathF.PI * 2) : float.NaN;
+			
+			// illness/inHospital -> dead
+			if ((Persons[i].Status == PersonStatus.Illness || Persons[i].Status == PersonStatus.InHospital)
+				&& random.NextDouble() < (DeathRate / 3))
 			{
-				Persons[i].Status = PersonStatus.Illness;
+				infectorIds.Remove(i); Hospital.PersonIds.Remove(i);
+				if (Persons[i].Status == PersonStatus.InHospital)
+				{
+					Persons[i].Position = new Vector2(int.MaxValue, int.MaxValue);
+				}
+				Persons[i].Status = PersonStatus.Dead;
+				continue;
+			}
+
+			// illness -> inHospital
+			if (Persons[i].Status == PersonStatus.Illness)
+			{
+				--Persons[i].EstimateDays;
+				if (Persons[i].EstimateDays <= 0 && Hospital.HasBed)
+				{
+					Hospital.Accept(Persons, i);
+				}
+
+				continue;
+			}
+
+			// infected -> illness
+			if (Persons[i].Status == PersonStatus.InfectedInShadow)
+			{
+				--Persons[i].EstimateDays;
+				if (Persons[i].EstimateDays <= 0)
+				{
+					Persons[i].Status = PersonStatus.Illness;
+					Persons[i].EstimateDays = GenerateToHospitalDays();
+				}
+				continue;
 			}
 		}
 
@@ -184,7 +272,7 @@ class City
 			{
 				foreach (var infectorId in infectorIds)
 				{
-					if (Vector2.DistanceSquared(Persons[x].Position, Persons[infectorId].Position) <= SafeDistance * SafeDistance)
+					if (Vector2.DistanceSquared(Persons[x].Position, Persons[infectorId].Position) <= SafeDistance() * SafeDistance())
 						return true;
 				}
 				return false;
@@ -195,35 +283,17 @@ class City
 		{
 			Infect(personId);
 		}
-
-		for (var i = 0; i < Persons.Length; ++i)
-		{
-			// infected -> dead
-			if ((Persons[i].Status == PersonStatus.Illness || Persons[i].Status == PersonStatus.InHospital)
-				&& random.NextDouble() < (DeathRate / 2))
-			{
-				infectorIds.Remove(i); Hospital.PersonIds.Remove(i);
-				Persons[i].Status = PersonStatus.Dead;
-				Persons[i].Position = new Vector2(int.MaxValue, int.MaxValue);
-			}
-
-			// illness -> inHospital
-			if (Hospital.HasBed && Persons[i].Status == PersonStatus.Illness)
-			{
-				Hospital.Accept(Persons, i);
-			}
-		}
 	}
 }
 
 class Hospital
 {
-	public int Beds = HospitalBeds;
+	public int Beds => HospitalBeds;
 	public SortedSet<int> PersonIds = new SortedSet<int>();
 
 	public bool HasBed => Beds > PersonIds.Count;
 
-	public void Heal(Person[] persons)
+	public void Heal(Person[] persons, SortedSet<int> infectorIds)
 	{
 		var curedIds = new List<int>();
 		int index = 0;
@@ -235,6 +305,7 @@ class Hospital
 			if (persons[i].EstimateDays <= 0)
 			{
 				curedIds.Add(i);
+				infectorIds.Remove(i);
 			}
 		}
 
@@ -246,13 +317,12 @@ class Hospital
 		}
 	}
 
-	const float Top = -400; const float Left = 450;
 	Vector2 GetPosition(int index)
 	{
 		int columnBeds = (int)(HospitalHeight / HospitalBedSize);
 		int column = index % columnBeds;
 		int row = index / columnBeds;
-		return new Vector2(Left + row * HospitalBedSize, Top + column * HospitalBedSize);
+		return new Vector2(HospitalX + row * HospitalBedSize, HospitalY + column * HospitalBedSize);
 	}
 
 	public void Accept(Person[] persons, int personId)
@@ -272,7 +342,7 @@ class Hospital
 			Vector2 topLeft = GetPosition(i);
 			ctx.DrawRectangle(new RectangleF(topLeft.X, topLeft.Y, HospitalBedSize, HospitalBedSize), x.GetColor(Color.Green));
 		}
-		ctx.DrawRectangle(new RectangleF(Left, Top, width, HospitalHeight), x.GetColor(HasBed ? Color.Black : Color.Red), 3.0f);
+		ctx.DrawRectangle(new RectangleF(HospitalX, HospitalY, width, HospitalHeight), x.GetColor(HasBed ? Color.Black : Color.Red), 3.0f);
 	}
 }
 
@@ -281,6 +351,7 @@ struct Person
 	public PersonStatus Status;
 	public Vector2 Position;
 	public float EstimateDays;
+	public float Direction;
 
 	public static Person Create(float citySize)
 	{
@@ -289,6 +360,7 @@ struct Person
 		var p = new Person { Status = PersonStatus.Healthy };
 		p.Position.X = (float)Math.Sin(pi) * r;
 		p.Position.Y = -(float)Math.Cos(pi) * r;
+		p.Direction = random.NextFloat(0, MathF.PI * 2);
 		return p;
 	}
 
@@ -300,19 +372,22 @@ struct Person
 	public void MoveAroundInCity(float dt, float citySize)
 	{
 		if (Status == PersonStatus.InHospital ||
-			Status == PersonStatus.Dead) return;
-		if (random.NextDouble() > MovingWilling) return;
+			Status == PersonStatus.Dead ||
+			float.IsNaN(Direction)) return;
 
 		float duration = dt / SecondsPerDay;
 
-		float direction = random.NextFloat(0, MathF.PI * 2);
-		float dx = MovingDistancePerDay * duration * MathF.Sin(direction);
-		float dy = MovingDistancePerDay * duration * -MathF.Cos(direction);
+		float dx = MovingDistancePerDay * duration * MathF.Sin(Direction);
+		float dy = MovingDistancePerDay * duration * -MathF.Cos(Direction);
 
 		var newPosition = Position + new Vector2(dx, dy);
 		if (newPosition.LengthSquared() < (citySize * citySize))
 		{
 			Position = newPosition;
+		}
+		else
+		{
+			Direction = random.NextFloat(0, MathF.PI * 2);
 		}
 	}
 }
