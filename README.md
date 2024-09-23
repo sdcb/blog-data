@@ -4,7 +4,7 @@
 ## .linq文件说明
 博客的代码文件我一般用`.linq`文件，这里特别说明一下。
 
-`.linq`文件是`LINQPad`文件的扩展名，你可以用LINQPad 7打开，LINQPad 7下载地址：https://www.linqpad.net/Download.aspx
+`.linq`文件是`LINQPad`文件的扩展名，你可以用LINQPad 8打开，LINQPad 8下载地址：https://www.linqpad.net/Download.aspx
 
 `LINQPad`是学习`C#`/`.NET`的好工具<small>（显然不光可以写`LINQ`）</small>，特别适合用来做小`demo`、原型验证、教学等领域，用起来很方便。
 
